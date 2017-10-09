@@ -1,0 +1,186 @@
+#!/bin/bash
+#
+# List pfSense/Snort alerts and correlate with other application logs.
+# Works with local logs collected by syslog-ng or rsyslog.
+# Currently supports DNS and Web application types.
+#
+# Version 1.0 10/9/2017, John McNally - jmcnally@acm.org
+#
+# EXAMPLES:
+#
+# idsalerts -p 1
+# --- List all priority 1 alerts from the current log (today)
+#
+# idsalerts -t web -s 163.172.68.238 -d 192.168.3.24 -D 20171004
+# --- Correlate alerts and web log entries for source IP 163.172.68.238 and destination (web server) IP 192.168.3.24 on log date October 4, 2017
+#
+# idsalerts -t dns -r mytransitguide -D 20170928
+# --- Correlate alerts and DNS queries containing the string "mytransitguide" on log date September 9, 2017
+
+# A POSIX variable
+OPTIND=1         # Reset in case getopts has been used previously in the shell.
+
+# Initialize our own variables:
+
+# Arguments
+priority=""
+source=""
+destination=""
+type=""
+logdate=""
+regex_additional=""
+verbose=false
+
+# Other
+source logging-hosts.sh
+
+logbase="/usr/local/groundwork/common/var/log/syslog-ng"
+loghost=""
+logsource=""
+logprefix=""
+logsuffix=""
+cmd=""
+regex=""
+destination_host_name=""
+
+function usage()
+{
+echo -e "Usage: $(basename $0) [OPTIONS...]
+  [-p priority]		IDS alert priority: 1, 2 or 3
+  [-s source]		source IP address
+  [-d destination]	destination IP address, host or domain for correlation
+  [-t type]		application log type: dns or web
+  [-D logdate]		log file date: YYYYMMDD
+  [-r regex_additional]	additional regular expression
+  [-v]			show verbose output
+  [-h | -?]		show this help message"
+}
+
+function listentries()
+{
+  logprefix="$logbase/$loghost/$loghost.log"
+  if [ $verbose = true ]; then
+    echo "logprefix=$logprefix"
+  fi
+  if [[ $logdate = "" ]]; then
+    if [ -f "$logprefix" ]; then
+      logsuffix=""
+      cmd="cat"
+    else
+      echo "Log not found for today."
+      return 1
+    fi
+  elif [ -f "$logprefix-$logdate" ]; then
+    logsuffix="-$logdate"
+    cmd="cat"
+  elif [ -f "$logprefix-$logdate.gz" ]; then
+    logsuffix="-$logdate.gz"
+    cmd="gunzip -c"
+  else
+    echo "Log not found for date \"$logdate\"."
+    return 1
+  fi
+
+  outstr=""
+  outstr=`$cmd $logprefix$logsuffix | grep -E "$regex"`
+  echo "Log Source/Host: $logsource/$loghost"
+  if [[ $outstr = "" ]]; then
+    echo -e "No log entries found.\n"
+  else
+    echo -e "$outstr\n"
+  fi
+}
+
+# Process options
+#if [ $# -eq 0 ]; then
+#  usage
+#  exit 1
+#fi
+
+while getopts ":p:s:d:t:D:r:vh?:" opt; do
+  case "$opt" in
+    p)
+      priority=$OPTARG
+      ;;
+    s)
+      source=$OPTARG
+      ;;
+    d)
+      destination=$OPTARG
+      ;;
+    t)
+      type=$OPTARG
+      if [[ $type != "dns" && $type != "web" && $type != "" ]]; then
+        echo "Invalid type: $OPTARG" 2>&1
+        usage
+        exit 1
+      fi
+      ;;
+    D)
+      logdate=$OPTARG
+      ;;
+    r)
+      regex_additional=$OPTARG
+      ;;
+    v)
+      verbose=true
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" 2>&1
+      usage
+      exit 1
+      ;;
+    \:)
+      echo "Argument required: -$OPTARG" 2>&1
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+[ "$1" = "--" ] && shift
+
+if [ $verbose = true ]; then
+  echo "priority=$priority, source=$source, destination=$destination, type=$type, date=$logdate, regex_additional=$regex_additional, verbose=$verbose, Leftovers: $@"
+fi
+
+# Reject any positional	arguments
+if [[ $@ != "" ]]; then 
+  echo "Invalid argument(s): $@" 2>&1
+  usage
+  exit 1
+fi
+
+# List pfSense/Snort IDS alerts
+regex="snort.+$regex_additional.+Priority: $priority.+$source.+$destination"
+logsource="snort"
+
+for ids_host in "${ids_hosts[@]}"
+do
+  loghost=$ids_host
+  listentries
+done
+
+# List application log entries
+if [[ $type = "dns" ]]; then
+  regex="$regex_additional"
+  logsource="$type"
+
+  for dns_host in "${dns_hosts[@]}"
+  do
+    loghost=$dns_host
+    listentries
+  done
+
+elif [[ $type = "web" ]]; then
+  regex="$source.+$regex_additional"
+  logsource="$type"
+  loghost=`dig +short -x $destination | cut -d"." -f1`
+  listentries
+fi
