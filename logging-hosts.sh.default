@@ -1,0 +1,7 @@
+declare -a ids_hosts=("ids1"
+                      "ids2"
+                     )
+
+declare -a dns_hosts=("ns1"
+                      "ns2"
+                     )
