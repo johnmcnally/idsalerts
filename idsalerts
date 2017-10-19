@@ -4,7 +4,7 @@
 # Works with local logs collected by syslog-ng or rsyslog.
 # Currently supports DNS and Web application types.
 #
-# Version 1.0 10/9/2017, John McNally - jmcnally@acm.org
+# Version 1.0.1 10/19/2017, John McNally - jmcnally@acm.org
 #
 # EXAMPLES:
 #
@@ -67,6 +67,7 @@ function listentries()
       logsuffix=""
       cmd="cat"
     else
+      echo "Log Source/Host: $logsource/$loghost"
       echo "Log not found for today."
       return 1
     fi
@@ -77,6 +78,7 @@ function listentries()
     logsuffix="-$logdate.gz"
     cmd="gunzip -c"
   else
+    echo "Log Source/Host: $logsource/$loghost"
     echo "Log not found for date \"$logdate\"."
     return 1
   fi
